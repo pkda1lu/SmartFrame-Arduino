@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Smart Frame</title>
+<style>
+:root { --bg:#0f0d18; --card:#1a1726; --acc:#9b6bff; --txt:#e8e6f0; --mut:#8a87a0; }
+* { box-sizing: border-box; }
+body { margin:0; font-family:system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+header { padding:16px 20px; background:var(--card); display:flex; justify-content:space-between; align-items:center; }
+header h1 { margin:0; font-size:18px; letter-spacing:1px; }
+.ip { color:var(--mut); font-size:12px; }
+main { max-width:900px; margin:0 auto; padding:16px; }
+.card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:16px; }
+.row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+button, .btn { background:var(--acc); color:#fff; border:0; padding:10px 16px; border-radius:8px; cursor:pointer; font-weight:600; }
+button.sec { background:#2a2640; }
+button.danger { background:#c0392b; }
+input[type=range] { flex:1; }
+input[type=number] { background:#0b0915; color:var(--txt); border:1px solid #2a2640; padding:8px; border-radius:6px; width:100px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
+.tile { background:#0b0915; border:1px solid #2a2640; padding:10px; border-radius:10px; }
+.tile.active { border-color: var(--acc); box-shadow: 0 0 0 2px rgba(155,107,255,.2); }
+.tile .name { font-size:12px; word-break:break-all; margin-bottom:8px; }
+.tile .acts { display:flex; gap:6px; }
+.tile button { padding:6px 10px; font-size:12px; flex:1; }
+.drop { border:2px dashed #2a2640; padding:30px; text-align:center; border-radius:10px; color:var(--mut); }
+.drop.over { border-color:var(--acc); color:var(--txt); }
+label { color:var(--mut); font-size:13px; display:block; margin-bottom:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MY FRAME</h1>
+  <div class="ip" id="ip">…</div>
+</header>
+<main>
+  <div class="card">
+    <h3 style="margin-top:0">Загрузка</h3>
+    <div id="drop" class="drop">Перетащите GIF сюда или <label class="btn" for="file">выберите файл</label>
+      <input id="file" type="file" accept=".gif" multiple style="display:none">
+    </div>
+    <div id="upStatus" style="margin-top:8px;color:var(--mut)"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Галерея</h3>
+    <div id="gallery" class="grid"></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Настройки</h3>
+    <div class="row" style="margin-bottom:12px">
+      <label style="flex:0 0 140px">Слайд (сек)</label>
+      <input type="number" id="slide" min="1" max="600">
+      <button onclick="saveSlide()">Сохранить</button>
+    </div>
+    <div class="row" style="margin-bottom:12px">
+      <label style="flex:0 0 140px">Яркость</label>
+      <input type="range" id="bri" min="10" max="255">
+      <span id="briVal"></span>
+    </div>
+    <div class="row">
+      <button class="danger" onclick="if(confirm('Сбросить Wi-Fi?'))fetch('/api/wifi_reset',{method:'POST'})">Сбросить Wi-Fi</button>
+    </div>
+  </div>
+</main>
+
+<script>
+let status = {};
+async function refresh() {
+  status = await (await fetch('/api/status')).json();
+  document.getElementById('ip').textContent = status.ip + (status.sd ? '' : ' • SD?');
+  document.getElementById('slide').value = Math.round(status.slide_ms/1000);
+  document.getElementById('bri').value = status.brightness;
+  document.getElementById('briVal').textContent = status.brightness;
+  const list = await (await fetch('/api/list')).json();
+  const g = document.getElementById('gallery');
+  g.innerHTML = '';
+  for (const f of list) {
+    const el = document.createElement('div');
+    el.className = 'tile' + (f.name === status.current ? ' active' : '');
+    el.innerHTML = `<div class="name">${f.name}</div>
+      <div class="acts">
+        <button onclick="sel('${f.name}')">▶</button>
+        <button class="sec" onclick="del('${f.name}')">✕</button>
+      </div>`;
+    g.appendChild(el);
+  }
+}
+async function sel(n) {
+  const fd = new FormData(); fd.append('name', n);
+  await fetch('/api/select', {method:'POST', body:fd});
+  setTimeout(refresh, 200);
+}
+async function del(n) {
+  if (!confirm('Удалить ' + n + '?')) return;
+  const fd = new FormData(); fd.append('name', n);
+  await fetch('/api/delete', {method:'POST', body:fd});
+  refresh();
+}
+async function saveSlide() {
+  const fd = new FormData();
+  fd.append('slide_ms', Math.max(1, +document.getElementById('slide').value) * 1000);
+  await fetch('/api/settings', {method:'POST', body:fd});
+}
+document.getElementById('bri').addEventListener('change', async (e) => {
+  const fd = new FormData(); fd.append('brightness', e.target.value);
+  await fetch('/api/settings', {method:'POST', body:fd});
+  document.getElementById('briVal').textContent = e.target.value;
+});
+
+// Upload
+const drop = document.getElementById('drop');
+const file = document.getElementById('file');
+const upS  = document.getElementById('upStatus');
+function uploadFiles(files) {
+  let i = 0;
+  const next = () => {
+    if (i >= files.length) { upS.textContent = 'Готово'; refresh(); return; }
+    const f = files[i++];
+    const fd = new FormData(); fd.append('f', f, f.name);
+    upS.textContent = `Загрузка ${f.name}…`;
+    fetch('/api/upload', {method:'POST', body:fd}).then(next);
+  };
+  next();
+}
+file.addEventListener('change', e => uploadFiles(e.target.files));
+['dragover','dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => uploadFiles(e.dataTransfer.files));
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
